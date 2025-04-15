@@ -6,22 +6,55 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import authRoutes from './routes/auth';
-import productRoutes from './routes/product'; // Updated to use the copied file
-import chatRoutes from './routes/chat';
-import userRoutes from './routes/user'; // Updated to use the copied file
 import { connectDB } from './config/database';
+import ensureDirectoriesExist from './utils/ensureDirectories';
+import authRoutes from './routes/auth';
+import productRoutes from './routes/product';
+import chatRoutes from './routes/chat';
+import userRoutes from './routes/user';
+import testRoutes from './routes/test';
 
+// Load environment variables
 dotenv.config();
+
+// Create directories needed for file storage in development mode
+ensureDirectoriesExist();
 
 const app = express();
 const httpServer = createServer(app as any);
 
 // CORS configuration
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://campuskart-beta.vercel.app', 'https://campuskart.vercel.app', 'http://localhost:3000', 'https://campuskart-beta.onrender.com'] 
-    : 'http://localhost:3000',
+  origin: function(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    const allowedOrigins = process.env.NODE_ENV === 'production' 
+      ? [
+          'https://campuskart-beta.vercel.app', 
+          'https://campuskart.vercel.app', 
+          'https://campuskart-beta.onrender.com',
+          'https://campuskart-backend-qw5z.onrender.com' // Allow backend to call itself
+        ]
+      : ['http://localhost:3000', 'http://localhost:5000']; // Allow backend-to-backend in dev
+      
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      console.log('CORS: Allowing request with no origin');
+      return callback(null, true);
+    }
+    
+    // Always allow the backend URL to call itself for testing
+    if (origin.includes('campuskart-backend-qw5z.onrender.com')) {
+      console.log(`CORS: Allowing backend self-call from ${origin}`);
+      return callback(null, true);
+    }
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+      console.log(`CORS: Allowing origin ${origin}`);
+      callback(null, true);
+    } else {
+      console.error(`Origin ${origin} not allowed by CORS`);
+      callback(new Error(`Not allowed by CORS: ${origin}`));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -38,14 +71,20 @@ const io = new Server(httpServer, {
 // Middleware
 app.use(cors(corsOptions));
 app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
-app.use('/uploads/profiles', express.static('uploads/profiles'));
+
+// Only serve static files locally in development mode
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+  app.use('/uploads/profiles', express.static('uploads/profiles'));
+  console.log('Static file serving enabled for local development');
+}
 
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/test', testRoutes);
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
